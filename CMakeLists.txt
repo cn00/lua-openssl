@@ -13,7 +13,7 @@ file(GLOB_RECURSE lopenssl_sources ./src/*.c ./src/*.h deps/*.c ./deps/*.h
     # openssl/engines/*.c 
     # openssl/include/*.h
     )
-# list(FILTER lopenssl_sources EXCLUDE REGEX ".*openssl.*")
+list(FILTER lopenssl_sources EXCLUDE REGEX "deps/.*test.*")
 
 
 source_group_by_dir(${CMAKE_CURRENT_SOURCE_DIR} lopenssl_sources)
@@ -24,6 +24,7 @@ include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/deps/auxiliar
   ${CMAKE_CURRENT_SOURCE_DIR}/deps/lua-compat
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/lua-compat/c-api
   ${CMAKE_CURRENT_SOURCE_DIR}/../lua
   ${CMAKE_CURRENT_SOURCE_DIR}/openssl/include
 )
