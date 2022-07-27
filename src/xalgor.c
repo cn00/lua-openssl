@@ -1,6 +1,5 @@
 /***
-x509.algor module for lua-openssl binding, Provide X509_ALGOR as lua object.
-Sometime when you make CSR,TS or X509, you maybe need to use this.
+x509.algor module to mapping X509_ALGOR to lua object.
 
 @module x509.algor
 @usage
@@ -67,7 +66,10 @@ static int openssl_xalgor_cmp(lua_State* L)
 {
   X509_ALGOR* alg = CHECK_OBJECT(1, X509_ALGOR, "openssl.x509_algor");
   X509_ALGOR* ano = CHECK_OBJECT(2, X509_ALGOR, "openssl.x509_algor");
-  lua_pushboolean(L, X509_ALGOR_cmp(alg, ano) == 0);
+  if ( alg->algorithm != NULL && ano->algorithm != NULL)
+    lua_pushboolean(L, X509_ALGOR_cmp(alg, ano) == 0);
+  else
+    lua_pushboolean(L, 1);
   return 1;
 }
 #endif
@@ -137,7 +139,7 @@ static int openssl_xalgor_set(lua_State* L)
   X509_ALGOR* alg = CHECK_OBJECT(1, X509_ALGOR, "openssl.x509_algor");
   ASN1_OBJECT* obj = CHECK_OBJECT(2, ASN1_OBJECT, "openssl.asn1_object");
   ASN1_STRING* val = lua_isnone(L, 3) ?
-                     NULL : auxiliar_checkgroup(L, "openssl.asn1_string", 3);
+                     NULL : CHECK_OBJECT(3, ASN1_STRING, "openssl.asn1_string");
   obj = OBJ_dup(obj);
   if(val)
   {

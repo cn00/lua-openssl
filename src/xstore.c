@@ -1,5 +1,6 @@
 /***
-Provide x509_store as lua object, create and manage x509 store object
+x509.store module to mapping X509_STORE to lua object.
+
 @module x509.store
 @usage
   store = require'openssl'.x509.store
@@ -195,7 +196,15 @@ static int openssl_xstore_load(lua_State* L)
   int ret;
   if (file || dir)
   {
+#if (OPENSSL_VERSION_NUMBER >= 0x30000000L)
+    ret = !(file == NULL && dir == NULL);
+    if (file != NULL)
+      ret = X509_STORE_load_file(ctx, file);
+    if (ret == 1 && dir != NULL)
+      ret = X509_STORE_load_path(ctx, dir);
+#else
     ret = X509_STORE_load_locations (ctx, file, dir);
+#endif
   }
   else
     ret = X509_STORE_set_default_paths(ctx);
@@ -224,20 +233,21 @@ static int openssl_xstore_add(lua_State* L)
       for (j = 1; j <= k; j++)
       {
         lua_rawgeti(L, i, j);
-        if (auxiliar_getclassudata(L, "openssl.x509", i))
+        if (auxiliar_getclassudata(L, "openssl.x509", -1))
         {
-          X509* x = CHECK_OBJECT(i, X509, "openssl.x509");
+          X509* x = CHECK_OBJECT(-1, X509, "openssl.x509");
           ret = X509_STORE_add_cert(ctx, x);
         }
-        else if (auxiliar_getclassudata(L, "openssl.x509_crl", i))
+        else if (auxiliar_getclassudata(L, "openssl.x509_crl", -1))
         {
-          X509_CRL* c = CHECK_OBJECT(i, X509_CRL, "openssl.x509_crl");
+          X509_CRL* c = CHECK_OBJECT(-1, X509_CRL, "openssl.x509_crl");
           ret = X509_STORE_add_crl(ctx, c);
         }
         else
         {
           luaL_argerror(L, i, "only accept table with x509 or x509_crl object");
         }
+        lua_pop(L, 1);
       }
     }
     else if (auxiliar_getclassudata(L, "openssl.x509", i))

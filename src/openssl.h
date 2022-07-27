@@ -32,6 +32,7 @@
 #include <openssl/bn.h>
 #include <openssl/hmac.h>
 #include <openssl/ts.h>
+#include <openssl/ocsp.h>
 
 /*-
 * Numeric release version identifier:
@@ -58,9 +59,9 @@
 */
 
 /*                              MNNFFPPS  */
-#define LOPENSSL_VERSION_NUM  0x0070800f
+#define LOPENSSL_VERSION_NUM  0x0080200f
 #ifndef LOPENSSL_VERSION
-#define LOPENSSL_VERSION  "0.7.8"
+#define LOPENSSL_VERSION  "0.8.2"
 #endif
 
 #if OPENSSL_VERSION_NUMBER >= 0x10000000L
@@ -137,17 +138,13 @@ void openssl_add_method(const OBJ_NAME *name, void *arg);
 static inline void* openssl_getclass(lua_State *L, const char* name, int idx)
 {
   void **p = (void**)auxiliar_getclassudata(L, name, idx);
-  if(p)
-    return *p;
-  return NULL;
+  return p!=NULL ? *p : NULL;
 }
 
 static inline void* openssl_getgroup(lua_State *L, const char* name, int idx)
 {
   void **p = (void**)auxiliar_getgroupudata(L, name, idx);
-  if(p)
-    return *p;
-  return NULL;
+  return p!=NULL ? *p : NULL;
 }
 
 #define GET_OBJECT(n,type,name) ((type*)openssl_getclass(L,name,n))

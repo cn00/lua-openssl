@@ -1,6 +1,7 @@
 local lu = require 'luaunit'
 local openssl = require 'openssl'
 local cipher = require'openssl'.cipher
+local helper = require'helper'
 
 TestCipherCompat = {}
 
@@ -15,19 +16,29 @@ function TestCipherCompat:setUp()
 
   lu.assertEquals('nil', type(getmetatable(cipher)))
 end
+
 function TestCipherCompat:tearDown()
 end
+
 function TestCipherCompat:testCipher()
   local a, b, c, d
 
-  a = cipher.cipher(self.alg, true, self.msg, self.key)
+  a = cipher.cipher(self.alg, true, self.msg, self.key, self.iv)
   assert(#a > #self.msg)
-  b = cipher.cipher(self.alg, false, a, self.key)
+  b = cipher.cipher(self.alg, false, a, self.key, self.iv)
   lu.assertEquals(b, self.msg)
 
-  c = cipher.encrypt(self.alg, self.msg, self.key)
+  c = cipher.encrypt(self.alg, self.msg, self.key, self.iv)
   lu.assertEquals(c, a)
-  d = cipher.decrypt(self.alg, c, self.key)
+  d = cipher.decrypt(self.alg, c, self.key, self.iv)
+  lu.assertEquals(d, self.msg)
+
+  local o = openssl.asn1.new_object(self.alg)
+  assert(type(o:nid())=='number')
+
+  c = cipher.encrypt(o, self.msg, self.key, self.iv)
+  lu.assertEquals(c, a)
+  d = cipher.decrypt(o:nid(), c, self.key, self.iv)
   lu.assertEquals(d, self.msg)
 end
 
@@ -35,26 +46,44 @@ function TestCipherCompat:testObject()
   local a, b, aa, bb
   local obj, obj1
 
-  obj = cipher.new(self.alg, true, self.key)
+  obj = cipher.new(self.alg, true, self.key, self.iv)
+  obj:padding(true)
   a = assert(obj:update(self.msg))
   a = a .. obj:final()
 
-  obj1 = cipher.new(self.alg, false, self.key)
+  local info = obj:info()
+  --
+  assert(info.block_size)
+  assert(info.key_length)
+  assert(info.iv_length)
+  assert(info.flags)
+  assert(info.mode)
+
+  if helper.openssl3 then
+    assert(obj:ctrl(openssl.cipher.EVP_CTRL_INIT))
+  else
+    obj:ctrl(openssl.cipher.EVP_CTRL_INIT)
+  end
+
+  obj:init(self.key, self.iv, true)
+  b = assert(obj:update(self.msg))
+  b = b .. obj:final()
+  assert(a==b)
+
+  obj1 = cipher.new(self.alg, false, self.key, self.iv)
   b = assert(obj1:update(a))
   b = b .. assert(obj1:final())
   lu.assertEquals(b, self.msg)
   assert(#a > #self.msg)
 
-  obj = cipher.encrypt_new(self.alg, self.key)
+  obj = cipher.encrypt_new(self.alg, self.key, self.iv)
   aa = assert(obj:update(self.msg))
   aa = aa .. assert(obj:final())
 
-  obj1 = cipher.decrypt_new(self.alg, self.key)
+  obj1 = cipher.decrypt_new(self.alg, self.key, self.iv)
   bb = assert(obj1:update(aa))
   local dd = assert(obj1:final())
   bb = bb .. dd
-  local ee = assert(obj1:final())
-  lu.assertEquals(dd, ee)
   lu.assertEquals(self.msg, bb)
   assert(#self.msg < #aa)
 end
@@ -85,21 +114,21 @@ function TestCipherMY:testList()
   local a, b, aa, bb
   local obj, obj1
 
-  obj = C:new(true, self.key)
+  obj = C:new(true, self.key, self.iv)
   a = assert(obj:update(self.msg))
   a = a .. obj:final()
 
-  obj1 = C:new(false, self.key)
+  obj1 = C:new(false, self.key, self.iv)
   b = assert(obj1:update(a))
   b = b .. assert(obj1:final())
   lu.assertEquals(b, self.msg)
   assert(#a >= #self.msg)
 
-  obj = C:encrypt_new(self.key)
+  obj = C:encrypt_new(self.key, self.iv)
   aa = assert(obj:update(self.msg))
   aa = aa .. assert(obj:final())
 
-  obj1 = C:decrypt_new(self.key)
+  obj1 = C:decrypt_new(self.key, self.iv)
   bb = assert(obj1:update(aa))
   bb = bb .. assert(obj1:final())
   lu.assertEquals(self.msg, bb)
@@ -119,27 +148,51 @@ end
 function TestCipherMY:testAesCTR()
 
   local C = cipher.get('aes-128-ctr')
+  assert(type(C:info())=='table')
 
-  local a, b, aa, bb
+  local a, b, aa, bb, cc
   local obj, obj1
 
-  obj = C:new(true, self.key)
+  obj = C:new(true, self.key, self.iv)
   a = assert(obj:update(self.msg))
   a = a .. obj:final()
 
-  obj1 = C:new(false, self.key)
+  assert(obj:init(self.key, self.iv, true))
+  b = assert(obj:update(self.msg))
+  b = b .. obj:final()
+  assert(a==b)
+
+  obj1 = C:new(false, self.key, self.iv)
   b = assert(obj1:update(a))
   b = b .. assert(obj1:final())
   lu.assertEquals(b, self.msg)
   assert(#a >= #self.msg)
 
-  obj = C:encrypt_new(self.key)
+  assert(obj1:init(self.key, self.iv, false))
+  b = assert(obj1:update(a))
+  b = b .. assert(obj1:final())
+  lu.assertEquals(b, self.msg)
+  assert(#a >= #self.msg)
+
+  obj = C:encrypt_new(self.key, self.iv)
   aa = assert(obj:update(self.msg))
   aa = aa .. assert(obj:final())
 
-  obj1 = C:decrypt_new(self.key)
+  assert(obj:init(self.key, self.iv))
+  bb = assert(obj:update(self.msg))
+  bb = bb .. assert(obj:final())
+  assert(aa==bb)
+
+  obj1 = C:decrypt_new(self.key, self.iv)
+  bb = assert(obj1:update(aa))
+  bb = bb .. assert(obj1:final())
+  lu.assertEquals(self.msg, bb)
+  assert(#self.msg <= #aa)
+
+  assert(obj1:init(self.key, self.iv))
   bb = assert(obj1:update(aa))
   bb = bb .. assert(obj1:final())
   lu.assertEquals(self.msg, bb)
   assert(#self.msg <= #aa)
 end
+

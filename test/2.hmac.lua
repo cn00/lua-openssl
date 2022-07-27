@@ -22,12 +22,16 @@ function TestHMACCompat:testDigest()
   lu.assertEquals(#b, 40)
   lu.assertEquals(openssl.hex(a):lower(), b)
 
-  a = hmac.new(self.alg, self.key)
+  a = assert(hmac.new(self.alg, self.key))
+  assert(a:size()>0)
   a:update(self.msg)
-  a = a:final()
-  lu.assertEquals(a, b)
-
-  c = hmac.new(self.alg, self.key)
-  c = c:final(self.msg)
+  c = a:final()
   lu.assertEquals(c, b)
+
+  a = assert(hmac.new(self.alg, self.key))
+  c = a:final(self.msg)
+  lu.assertEquals(c, b)
+
+  c = a:final(self.msg, true)
+  assert(c, openssl.hex(b))
 end

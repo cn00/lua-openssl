@@ -1,5 +1,6 @@
 local openssl = require 'openssl'
 local lu = require 'luaunit'
+local helper = require'helper'
 
 local asn1 = openssl.asn1
 local first = true
@@ -7,6 +8,7 @@ local first = true
 TestObject = {}
 
 function TestObject:setUp()
+  openssl.clear_error()
   self.sn = 'C'
   self.ln = 'countryName'
   self.oid = '2.5.4.6'
@@ -142,6 +144,12 @@ function TestString:testAll()
   s5 = s4:dup()
   lu.assertEquals(s5, s3)
   assert(s4 == s3)
+
+  local o = asn1.new_string('octet', asn1.OCTET_STRING)
+  lu.assertEquals(o:type(), asn1.OCTET_STRING)
+
+  assert(type(asn1.tostring(asn1.UNIVERSAL,'tag'))=='string')
+  assert(type(asn1.tostring(asn1.APPLICATION,'class'))=='string')
 end
 
 TestTime = {}
@@ -162,6 +170,32 @@ function TestTime:testUTCTime()
   assert(at:set(self.time))
   local t1 = at:get()
   lu.assertEquals(self.gmt, t1)
+  at = openssl.asn1.new_utctime(self.time)
+  assert(at)
+  assert(type(at:tostring())=='string')
+  local d = at:i2d()
+  assert(type(d)=='string')
+  local ab = openssl.asn1.new_utctime()
+  ab:d2i(d)
+  assert(ab==at)
+  assert(at:check())
+  ab = openssl.asn1.new_utctime(self.time+1)
+  if ab.diff then
+    local day, sec = ab:diff(at)
+    assert(day==0)
+    assert(sec==-1)
+    at:adj(self.time, 1, 1)
+    day, sec = ab:diff(at)
+    assert(day==1, day)
+    assert(sec==0, sec)
+    assert(type(ab:toprint()=='string'))
+  end
+
+  ab:set("19971112153010.5Z")
+  if not helper.libressl then  -- FIXME: libressl
+    local ac = assert(openssl.asn1.new_utctime("19971112153010.5Z"))
+    assert(ac:tostring())
+  end
 end
 
 function TestTime:testGENERALIZEDTime()
@@ -169,18 +203,101 @@ function TestTime:testGENERALIZEDTime()
   assert(at:set(self.time))
   local t1 = at:get()
   lu.assertEquals(self.gmt, t1)
+  at = openssl.asn1.new_generalizedtime(self.time)
+  assert(at)
+  assert(type(at:tostring())=='string')
+  local d = at:i2d()
+  assert(type(d)=='string')
+  local ab = openssl.asn1.new_generalizedtime()
+  ab:d2i(d)
+  assert(ab==at)
+  assert(at:check())
+  ab = openssl.asn1.new_generalizedtime(self.time+1)
+  if ab.diff then
+    local day, sec = ab:diff(at)
+    assert(day==0)
+    assert(sec==-1)
+    at:adj(self.time, 1, 1)
+    day, sec = ab:diff(at)
+    assert(day==1, day)
+    assert(sec==0, sec)
+    assert(type(ab:toprint()=='string'))
+  end
+
+  ab:set("19971112153010.5Z")
+  if not helper.libressl then  -- FIXME: libressl
+    local ac = assert(openssl.asn1.new_generalizedtime("19971112153010.5Z"))
+    assert(ac:tostring())
+  end
 end
 
 TestNumber = {}
 function TestNumber:testBasic()
   local i = 0
   local n = asn1.new_integer(i):i2d()
-  assert(n)
   local m = asn1.new_integer()
+  assert(type(m:tostring())=='string')
   m:d2i(n)
   assert(m:i2d() == n)
   n = asn1.new_integer():i2d()
   assert(n)
   n = asn1.new_integer(nil):i2d()
   assert(n)
+  n = asn1.new_integer("Xabcdef")
+  assert(n)
+  local b = n:bn()
+  i = asn1.new_integer(b)
+  assert(i==n)
+  n:set(1)
+  assert(type(i:toprint()=='string'))
+  assert(i:bn(b))
+  assert(b==i:get())
+end
+
+TestType = {}
+function TestType:testBasic()
+  local o = asn1.new_type('timeStamping')
+  local d = assert(o:i2d())
+  assert(asn1.d2i_asn1type(d)==o)
+  o = asn1.new_type(true)
+  d = assert(o:i2d())
+  assert(asn1.d2i_asn1type(d)==o)
+  o = asn1.new_type(100)
+  d = assert(o:i2d())
+  assert(asn1.d2i_asn1type(d)==o)
+  local s = asn1.new_string("中文")
+  o = asn1.new_type(s)
+  d = assert(o:i2d())
+  assert(asn1.d2i_asn1type(d)==o)
+
+  s = asn1.new_string("BIT", asn1.BIT_STRING)
+  o = asn1.new_type(s)
+  d = assert(o:i2d())
+  assert(asn1.d2i_asn1type(d)==o)
+  assert(o:info())
+
+  s = asn1.new_string("BMP", asn1.BMPSTRING)
+  o = asn1.new_type(s)
+  d = assert(o:i2d())
+  -- FIXME: BMPSTRING
+  -- assert(asn1.d2i_asn1type(d)==o)
+  assert(o:info())
+
+  s = asn1.new_string("octet", asn1.OCTET_STRING)
+  o = asn1.new_type(s)
+  d = assert(o:i2d())
+  assert(asn1.d2i_asn1type(d)==o)
+  assert(o:info())
+
+  assert(o:octet()=='octet')
+  assert(o:octet('abcd'))
+  assert(o:octet()=='abcd')
+
+  local t = openssl.asn1.new_utctime()
+  o = asn1.new_type(t)
+  d = assert(o:i2d())
+  assert(asn1.d2i_asn1type(d)==o)
+  assert(o:type())
+  assert(o:info())
+  assert(o:asn1string())
 end

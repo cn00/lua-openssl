@@ -1,6 +1,7 @@
 local lu = require 'luaunit'
 local openssl = require 'openssl'
 local digest = require'openssl'.digest
+local helper = require'helper'
 local unpack = unpack or table.unpack
 
 TestDigestCompat = {}
@@ -22,7 +23,17 @@ function TestDigestCompat:testDigest()
   lu.assertEquals(a, b)
   c = digest.digest(self.alg, self.msg, true)
   lu.assertEquals(#c, 20)
+
+  local o = openssl.asn1.new_object(self.alg)
+  assert(type(o:nid())=='number')
+
+  c = digest.digest(o:nid(), self.msg, true)
+  lu.assertEquals(#c, 20)
+
+  c = digest.digest(o, self.msg, true)
+  lu.assertEquals(#c, 20)
 end
+
 function TestDigestCompat:testObject()
   local a, b, c, aa, bb
   local obj = digest.new(self.alg)
@@ -39,11 +50,11 @@ function TestDigestCompat:testObject()
   lu.assertEquals(2 * #c, #a)
 
   obj:reset()
-  local obj1 = obj:clone()
-
   obj:update(self.msg)
   aa = obj:final(self.msg)
-  bb = obj1:final(self.msg .. self.msg)
+
+  obj:reset()
+  bb = obj:final(self.msg .. self.msg)
   lu.assertEquals(aa, bb)
 end
 
@@ -58,15 +69,24 @@ function TestDigestMY:testList()
   local md = digest.get('sha1')
   t = md:info()
   assert(t.size == 20)
+  t = md:digest('abcd')
+  assert(type(t)=='string')
+  assert(#t==20)
 
+  if not helper.openssl3 then
   local ctx1 = md:new()
   t1 = ctx1:info()
+  assert(ctx1:update('ab'))
+  local dat = ctx1:data()
   local ctx = digest.new('sha1')
   t2 = ctx:info()
-  for k, _ in pairs(t1) do
-    if (k ~= 'digest') then assert(t1[k] == t2[k]) end
-  end
+  for k, _ in pairs(t1) do if (k ~= 'digest') then assert(t1[k] == t2[k]) end end
+  assert(ctx:data(dat))
   assert(t1.size == 20)
+  assert(ctx:update('cd'))
+  t2 = ctx:final(true)
+  assert(t==t2)
+  end
 end
 
 local function mk_key(args)
@@ -76,34 +96,34 @@ local function mk_key(args)
   return k
 end
 
-TestSignVry = {}
-function TestSignVry:setUp()
+TestDigestSignVry = {}
+function TestDigestSignVry:setUp()
   self.msg = 'abcd'
   self.alg = 'sha1'
   self.prik = mk_key({'rsa',  2048,  3})
-  self.pubk = openssl.pkey.get_public(self.prik)
+  self.pubk = assert(openssl.pkey.get_public(self.prik))
 end
-function TestSignVry:testSignVry()
-  local md = digest.get(self.alg)
-  local sctx = digest.signInit(md, self.pubk);
+function TestDigestSignVry:testSignVry()
+  local md = assert(digest.get(self.alg))
+  local sctx = digest.signInit(md, self.prik);
   assert(sctx:signUpdate(self.msg))
   assert(sctx:signUpdate(self.msg))
-  local sig = sctx:signFinal(self.prik)
+  local sig = sctx:signFinal()
   lu.assertEquals(#sig, 256)
   local vctx = digest.verifyInit(md, self.pubk)
   assert(vctx:verifyUpdate(self.msg))
   assert(vctx:verifyUpdate(self.msg))
   assert(vctx:verifyFinal(sig))
 end
-function TestSignVry:testSignVry1()
+function TestDigestSignVry:testSignVry1()
   local md = digest.get(self.alg)
   local sctx = md:signInit(self.prik);
   assert(sctx:signUpdate(self.msg))
   assert(sctx:signUpdate(self.msg))
-  local sig = sctx:signFinal(self.prik)
+  local sig = sctx:signFinal()
   lu.assertEquals(#sig, 256)
   local vctx = md:verifyInit(self.pubk)
   assert(vctx:verifyUpdate(self.msg))
   assert(vctx:verifyUpdate(self.msg))
-  assert(vctx:verifyFinal(sig, self.pubk))
+  assert(vctx:verifyFinal(sig))
 end

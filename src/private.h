@@ -12,6 +12,10 @@ extern "C" {
 #include "compat-5.3.h"
 #endif
 
+#if (OPENSSL_VERSION_NUMBER >= 0x30000000L)
+#include "openssl/provider.h"
+#endif
+
 #define luaL_checktable(L, n) luaL_checktype(L, n, LUA_TTABLE)
 
 #if LUA_VERSION_NUM >= 502
@@ -39,6 +43,10 @@ extern "C" {
 #endif
 #endif
 
+#ifdef _WIN32
+#define strcasecmp stricmp
+#endif
+
 #include "openssl.h"
 
 #if OPENSSL_VERSION_NUMBER > 0x10100000L
@@ -58,11 +66,22 @@ extern "C" {
   luaL_getmetatable(L,"openssl.bn");                    \
   lua_setmetatable(L,-2)
 
+#if OPENSSL_VERSION_NUMBER < 0x10101000L || defined(LIBRESSL_VERSION_NUMBER)
+#define EC_POINT_set_affine_coordinates EC_POINT_set_affine_coordinates_GFp
+#define EC_POINT_get_affine_coordinates EC_POINT_get_affine_coordinates_GFp
+#define EC_GROUP_get_curve EC_GROUP_get_curve_GFp
+#endif
+
 #if OPENSSL_VERSION_NUMBER < 0x10100000L || defined(LIBRESSL_VERSION_NUMBER)
 int BIO_up_ref(BIO *b);
 int X509_up_ref(X509 *x);
 int X509_STORE_up_ref(X509_STORE *s);
 int EVP_PKEY_up_ref(EVP_PKEY *pkey);
+
+#include <openssl/ssl.h>
+int SSL_up_ref(SSL *s);
+int SSL_CTX_up_ref(SSL_CTX *ctx);
+int SSL_SESSION_up_ref(SSL_SESSION *s);
 
 DH *EVP_PKEY_get0_DH(EVP_PKEY *pkey);
 int DH_bits(const DH *dh);
@@ -150,6 +169,18 @@ int X509_get_signature_nid(const X509 *x);
 const unsigned char *ASN1_STRING_get0_data(const ASN1_STRING *x);
 const ASN1_TIME *X509_CRL_get0_lastUpdate(const X509_CRL *crl);
 const ASN1_TIME *X509_CRL_get0_nextUpdate(const X509_CRL *crl);
+
+const OCSP_CERTID *OCSP_SINGLERESP_get0_id(const OCSP_SINGLERESP *x);
+
+const ASN1_GENERALIZEDTIME *OCSP_resp_get0_produced_at(const OCSP_BASICRESP* bs);
+const STACK_OF(X509) *OCSP_resp_get0_certs(const OCSP_BASICRESP *bs);
+int OCSP_resp_get0_id(const OCSP_BASICRESP *bs,
+                      const ASN1_OCTET_STRING **pid,
+                      const X509_NAME **pname);
+
+const ASN1_OCTET_STRING *OCSP_resp_get0_signature(const OCSP_BASICRESP *bs);
+const X509_ALGOR *OCSP_resp_get0_tbs_sigalg(const OCSP_BASICRESP *bs);
+
 #endif /* < 1.1.0 */
 
 #define AUXILIAR_SETOBJECT(L, cval, ltype, idx, lvar) \
@@ -212,6 +243,9 @@ int openssl_push_asn1type(lua_State* L, const ASN1_TYPE* type);
 int openssl_push_asn1object(lua_State* L, const ASN1_OBJECT* obj);
 int openssl_push_asn1(lua_State* L, const ASN1_STRING* string, int type);
 int openssl_push_general_name(lua_State*L, const GENERAL_NAME* name);
+int openssl_push_asn1integer_as_bn(lua_State *L, const ASN1_INTEGER* ai);
+
+int openssl_push_x509_signature(lua_State *L, const X509_ALGOR *alg, const ASN1_STRING *sig, int i);
 
 #define PUSH_ASN1_TIME(L, tm)             openssl_push_asn1(L, (ASN1_STRING*)(tm), V_ASN1_UTCTIME)
 #define PUSH_ASN1_INTEGER(L, i)           openssl_push_asn1(L, (ASN1_STRING*)(i),  V_ASN1_INTEGER)
@@ -240,8 +274,8 @@ int openssl_valueset(lua_State*L, const void*p, const char*field);
 int openssl_valueget(lua_State*L, const void*p, const char*field);
 int openssl_valueseti(lua_State*L, const void*p, int i);
 int openssl_valuegeti(lua_State*L, const void*p, int i);
-size_t openssl_valuelen(lua_State*L, const void*p);
-int openssl_refrence(lua_State*L, const void*p, int op);
+int openssl_valuesetp(lua_State*L, const void*p, const void*d);
+int openssl_valuegetp(lua_State*L, const void*p, const void*d);
 
 int openssl_verify_cb(int preverify_ok, X509_STORE_CTX *xctx);
 int openssl_cert_verify_cb(X509_STORE_CTX *xctx, void* u);
@@ -256,7 +290,7 @@ int openssl_sk_x509_extension_totable(lua_State *L, const STACK_OF(X509_EXTENSIO
 int openssl_sk_x509_algor_totable(lua_State *L, const STACK_OF(X509_ALGOR)* sk);
 int openssl_sk_x509_name_totable(lua_State *L, const STACK_OF(X509_NAME)* sk);
 
-X509_ATTRIBUTE* openssl_new_xattribute(lua_State*L, X509_ATTRIBUTE** a, int idx, const char* eprefix);
+X509_ATTRIBUTE* openssl_new_xattribute(lua_State*L, X509_ATTRIBUTE** a, int idx);
 
 int openssl_pusherror (lua_State *L, const char *fmt, ...);
 int openssl_pushargerror (lua_State *L, int arg, const char *extramsg);
@@ -269,6 +303,12 @@ int openssl_pushargerror (lua_State *L, int arg, const char *extramsg);
 
 #ifdef HAVE_USER_CUSTOME
 #include HAVE_USER_CUSTOME
+#endif
+
+#if defined(OPENSSL_SUPPORT_SM2)
+#ifndef SM2_DEFAULT_USERID
+#  define SM2_DEFAULT_USERID "1234567812345678"
+#endif
 #endif
 
 #if defined(__cplusplus)

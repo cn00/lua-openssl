@@ -1,5 +1,6 @@
 local lu = require 'luaunit'
 
+local helper = require'helper'
 local openssl = require 'openssl'
 local crl, csr = openssl.x509.crl, openssl.x509.req
 
@@ -7,50 +8,110 @@ TestCRL = {}
 function TestCRL:setUp()
   self.alg = 'sha1'
 
-  self.cadn = openssl.x509.name.new({{commonName = 'CA'},  {C = 'CN'}})
   self.dn = openssl.x509.name.new({{commonName = 'DEMO'},  {C = 'CN'}})
 
   self.digest = 'sha1WithRSAEncryption'
+  self.fake_subject = openssl.x509.name.new({{commonName = 'Fake'},  {C = 'CN'}})
+end
+
+function TestCRL:testReason()
+  local reasons = crl.reason()
+  assert(#reasons>=10)
 end
 
 function TestCRL:testNew()
+  local ca = helper.get_ca()
+
   local pkey = assert(openssl.pkey.new())
-  local req = assert(csr.new(self.cadn, pkey))
-  local t = req:parse()
-  lu.assertEquals(type(t), 'table')
+  local fake = assert(csr.new(self.fake_subject, pkey))
+  fake = assert(fake:to_x509(pkey, 3650)) -- self sign
 
-  local cacert = openssl.x509.new(1, -- serialNumber
-  req -- copy name and extensions
-  )
-
-  cacert:validat(os.time(), os.time() + 3600 * 24 * 365)
-  assert(cacert:sign(pkey, cacert)) -- self sign
-  lu.assertEquals(cacert:subject(), cacert:issuer())
+  local other = crl.new()
+  assert(other:issuer(ca.cacert))
+  assert(other:version(0))
+  assert(other:lastUpdate(os.time()))
+  assert(other:nextUpdate(os.time() + 24*3600))
+  local ret, err = other:sign(ca.pkey, fake)
+  assert(not ret)
+  lu.assertStrMatches("private key not match with cacert", err)
 
   local list = assert(crl.new({
     {sn = 1,  time = os.time()},  {sn = 2,  time = os.time()},
     {sn = 3,  time = os.time()},  {sn = 4,  time = os.time()}
-  }, cacert, pkey))
+  }, ca.cacert, ca.pkey))
   assert(#list == 4)
   -- print_r(list:parse())
-  local other = crl.new()
-  assert(other:issuer(cacert:issuer()))
+  other = crl.new()
+  assert(other:issuer(ca.cacert:issuer()))
+  issuer = other:issuer()
+  assert(other:issuer(ca.cacert))
+  assert(issuer:cmp(other:issuer()))
   assert(other:version(0))
-  assert(other:updateTime(50000000))
   assert(other:lastUpdate(os.time()))
-  assert(other:nextUpdate(os.time() + 50000000))
+  assert(other:nextUpdate(os.time() + 24*3600))
 
   assert(other:add('21234', os.time()))
   assert(other:add('31234', os.time()))
   assert(other:add('41234', os.time()))
   assert(other:add('11234', os.time()))
 
-  assert(other:sign(pkey, cacert))
-  assert(other:verify(cacert))
+  assert(other:sign(ca.pkey, ca.cacert))
+  assert(other:verify(ca.cacert))
+  local pem = other:export()
+
+  assert(other:updateTime(3600))
+  assert(other:updateTime(os.time(), 3600))
+
+  assert(other:extensions({
+    openssl.x509.extension.new_extension(
+      {object = 'basicConstraints',  value = 'CA:FALSE'}
+    )
+  }))
+
+  local exts = other:extensions()
+  assert(#exts==1)
+  assert(tostring(exts[1]):match("openssl.x509_extension"))
+
+  assert(other:add('21234', os.time()))
+  assert(other:sort())
+  assert(other:sign(ca.pkey, ca.cacert:issuer()))
+  assert(other:verify(ca.cacert))
+  assert(other:verify(ca.pkey))
 
   assert(other:export())
-  t = other:get(0)
+  local info = other:parse()
+
+  assert(type(info.revoked)=='table')
+  assert(type(info.extensions)=='table')
+  local t = other:get(0, true)
   lu.assertIsTable(t)
+  assert(type(other:digest())=='string')
+  local r = other:get(0)
+  info = r:info()
+  assert(type(info)=='table')
+  assert(info.code)
+  assert(info.reason)
+  assert(info.revocationDate)
+  assert(info.serialNumber)
+  assert(info.extensions)
+
+  local code, reason = r:reason()
+  assert(type(code)=='number')
+  assert(type(reason)=='string')
+  assert(r:revocationDate())
+  assert(r:serialNumber())
+  assert(r:extensions())
+
+  if other.diff then
+    local crx = crl.read(pem)
+    local diff = other:diff(crx, ca.pkey)
+    if diff then
+      diff = diff:get('21234')
+      assert(type(diff)=='table')
+
+      assert(#diff==1)
+    end
+  end
 end
 
 function TestCRL:testRead()

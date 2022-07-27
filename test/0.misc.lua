@@ -1,4 +1,5 @@
 local openssl = require('openssl')
+local helper = require('helper')
 local lu = require('luaunit')
 
 local msg = 'The quick brown fox jumps over the lazy dog.'
@@ -9,6 +10,7 @@ function testHex()
   local raw = openssl.hex(ano, false)
   lu.assertEquals(raw, msg)
   lu.assertEquals(#msg * 2, #ano)
+  lu.assertEquals("", openssl.hex(""))
 end
 
 function testBase64()
@@ -62,8 +64,16 @@ function testBase64()
 end
 
 function testAll()
-  local f = io.open('openssl.cnf', 'r')
-  if not f then f = io.open('test/openssl.cnf', 'r') end
+  local t = openssl.list('digests')
+  assert(type(t)=='table')
+  if not helper.openssl3 and not helper.libressl then
+    assert(type(openssl.FIPS_mode())=='boolean')
+  end
+  local rand = openssl.random(1024)
+  openssl.rand_add(rand)
+  openssl.random(16, true)
+
+  local f = io.open('certs/ca2.cnf', 'r')
   if f then
     local data = f:read('*a')
     f:close()
@@ -78,13 +88,13 @@ function testAll()
     t = conf:parse(true)
     lu.assertIsTable(t)
 
-    assert(conf:get_string('ca', 'default_ca'))
-    assert(conf:get_string('CA_default', 'default_days'))
+    assert(conf:get_string('ca', 'default_ca')=='CA_default')
+    assert(conf:get_number('CA_default', 'default_crl_days')==999)
+    assert(conf:get_number('req', 'default_bits')==1024)
 
-    local c1 = openssl.lhash_load('openssl.cnf') or
-                 openssl.lhash_load('test/openssl.cnf')
+    local c1 = openssl.lhash_load('certs/ca1.cnf')
     t = c1:parse()
+    assert(type(c1:export())=='string')
     lu.assertIsTable(t)
-
   end
 end

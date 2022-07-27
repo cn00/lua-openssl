@@ -1,63 +1,110 @@
-local openssl = require'openssl'
-local ext = openssl.x509.extension
+local openssl = require("openssl")
+local ca = require("utils.ca")
 
 local M = {}
 
-local default_caexts = {
-  {
-     object='basicConstraints',
-     value='CA:true',
-     critical = true
-  },
-  {
-    object='keyUsage',
-    value='keyCertSign'
-  }
-}
-
-function M.to_extensions(exts)
-  exts = exts or default_caexts
-  local ret = {}
-  for i=1, #exts do
-    ret[i] = ext.new_extension(exts[i])
-  end
-  return ret
-end
-
-function M.new_ca(subject)
-  --cacert, self sign
-  local pkey = assert(openssl.pkey.new())
-  local req = assert(openssl.x509.req.new(subject, pkey))
-  local cacert = openssl.x509.new(
-    1,      --serialNumber
-    req     --copy name and extensions
-  )
-  cacert:extensions(M.to_extensions())
-  cacert:notbefore(os.time())
-  cacert:notafter(os.time() + 3600*24*365)
-  assert(cacert:sign(pkey, cacert))  --self sign
-  return pkey, cacert
-end
-
 M.luaopensslv, M.luav, M.opensslv = openssl.version()
-M.libressl = M.opensslv:find('^LibreSSL')
+M.libressl = M.opensslv:find("^LibreSSL")
+M.openssl3 = M.opensslv:find("^OpenSSL 3")
 
 function M.sslProtocol(srv, protocol)
-  local _,_,opensslv = openssl.version(true)
-  if M.libressl or opensslv < 0x10100000 then
-    protocol = protocol or 'SSLv23'
-  else
-    protocol = protocol or 'TLS'
+  protocol = protocol or openssl.ssl.default
+  if M.opensslv:match('1.0.2') then
+    protocol = protocol:gsub('DTLS', 'DTLSv1_2')
   end
-  if srv==true then
-    return protocol.."_server"
-  elseif srv==false then
-    return protocol.."_client"
-  elseif srv==nil then
+  if srv == true then
+    return protocol .. "_server"
+  elseif srv == false then
+    return protocol .. "_client"
+  elseif srv == nil then
     return protocol
   end
   assert(nil)
 end
 
-return M
+function M.get_ca()
+  if not M.ca then
+    M.ca = ca:new()
+  end
+  return M.ca
+end
 
+function M.new_req(subject)
+  local pkey = openssl.pkey.new()
+  if type(subject) == "table" then
+    subject = openssl.x509.name.new(subject)
+  end
+  local req = assert(openssl.x509.req.new(subject, pkey))
+  return req, pkey
+end
+
+function M.sign(subject, extensions)
+  local CA = M.get_ca()
+  if not type(subject):match("x509.req") then
+    local req, pkey = M.new_req(subject)
+    local cert = CA:sign(req, extensions)
+    return cert, pkey
+  end
+  return CA:sign(subject, extensions)
+end
+
+function M.spawn(cmd, args, pattern, after_start, after_close, env)
+  local uv = require("luv")
+  env = env or {}
+  if os.getenv('ASAN_LIB') then
+    env[#env+1] = 'DYLD_INSERT_LIBRARIES=' .. os.getenv('ASAN_LIB')
+  end
+  env[#env+1] = 'LUA_CPATH=' .. package.cpath
+  env[#env+1] = 'LUA_PATH=' .. package.path
+
+  local function stderr_read(err, chunk)
+    assert(not err, err)
+    if (chunk) then
+      io.write(chunk)
+      io.flush()
+    end
+  end
+
+  local resutls = ''
+  local function stdout_read(err, chunk)
+    assert(not err, err)
+    if (chunk) then
+      io.write(chunk)
+      io.flush()
+      resutls = resutls .. chunk
+      if pattern and resutls:match(pattern) then
+        print('matched.ing')
+        if after_start then
+          after_start()
+        end
+        resutls=''
+      end
+    end
+  end
+
+  local stdin = uv.new_pipe(false)
+  local stdout = uv.new_pipe(false)
+  local stderr = uv.new_pipe(false)
+
+  local handle, pid
+  handle, pid = assert(uv.spawn(
+    cmd,
+    {
+      args = args,
+      env = env,
+      cwd = uv.cwd(),
+      stdio = { stdin, stdout, stderr },
+    },
+    function(code, signal)
+      uv.close(handle)
+      if after_close then
+        after_close(code, signal)
+      end
+    end
+  ))
+  uv.read_start(stdout, stdout_read)
+  uv.read_start(stderr, stderr_read)
+  return handle, pid
+end
+
+return M
