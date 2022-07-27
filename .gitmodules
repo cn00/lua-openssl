@@ -4,3 +4,6 @@
 [submodule "deps/lua-compat"]
 	path = deps/lua-compat
 	url = https://github.com/keplerproject/lua-compat-5.3.git
+[submodule "openssl"]
+	path = openssl
+	url = git@github.com:openssl/openssl.git
